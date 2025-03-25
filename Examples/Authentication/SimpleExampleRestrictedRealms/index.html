@@ -1,0 +1,89 @@
+<html>
+<head>
+<script src="autobahn.min.js"></script>
+</head>
+
+<body>
+<h1>Hello - Client 1</h1>
+
+<button onclick="sendMessage('hello from client 1')" type="button">Here goes</button>
+<br/>
+<div id="panel1">
+</div>
+
+<script type='text/javascript'>
+var connString = "ws://localhost:8090"; 
+
+ var conn = new autobahn.Connection({
+ url: connString, 
+ realm: 'thruway-realm',
+ max_retries: 4,
+ initial_retry_delay: 3,
+ on_user_error: onUserError,
+ on_internal_error: onInternalError,
+ authid: 'mycustom-user-id',
+ authmethods: ['ticket'],
+  onchallenge: function (session, method, extra) {
+		  console.log("I was challenged! ", method, extra);
+            switch (method) {
+			//TODO - lookup member's unique ID or token and return it, and update authprovider to check for it
+                case 'ticket': return "custom-string-here";
+			default:
+                   throw new Error('Unknown auth method');
+				}
+	}
+ }); 
+
+var mySession = null;
+var channelName ="com.mydomain.lobby";
+
+conn.onopen = function (session, details) {
+	
+	mySession = session;
+	var text = `session ${session.id} established!`;
+	console.log(text, details);
+	addText(text);
+	  
+    mySession.subscribe(channelName, onReceivedMessage).then(
+		function (subscription) { console.log("subscribed to channel "+channelName); } , 
+		function(error) { console.log("subscription failed: " +error); }
+   );
+};
+function onUserError(error, customErrorMessage) {
+ console.log("User Error: " , error, customErrorMessage);
+ }
+ 
+function onInternalError(error, customErrorMessage) {
+ console.log("Internal Error: " , error, customErrorMessage);
+ }
+
+//Reason can be closed (no retry), lost (retry), unreachable, or unsupported
+conn.onclose = function (reason, details) {
+   // connection closed, lost or unable to connect 
+ var msg = "Connection has closed: " + reason + ": " + details.reason;
+	console.log(msg);
+   addText(msg);
+};
+ conn.open();
+ 
+   function onReceivedMessage(args, kwargs, details) {
+      console.log("Event RECD:", args, kwargs, details);
+	  addText(args[0]);
+   }
+//Session.publish(topic, args, kwargs, options)
+function sendMessage(data) {
+console.log("Sending...", data);
+//console.log("Is connected?", conn.isConnected, conn.isOpen);
+	mySession.publish(channelName, [ data, {type:"my type"} ], {type:"my-type", style:"font-weight:bold;"}, {exclude_me:false});
+};
+
+function addText(text) {
+ const ele = document.getElementById('panel1');
+   var newNode = document.createElement('p');
+   newNode.innerHTML = text;
+	ele.appendChild(newNode);
+}
+
+</script>
+</body>
+</html>

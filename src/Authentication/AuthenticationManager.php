@@ -136,6 +136,7 @@ class AuthenticationManager extends RouterModuleClient implements RealmModuleInt
      */
     private function processMessage(Realm $realm, Session $session, Message $msg)
     {
+        Logger::debug($this, '**** Authentication Manager --ProcessMessage');
         if ($session->isAuthenticated()) {
             throw new \Exception('Message sent to authentication manager for already authenticated session.');
         }
@@ -448,10 +449,10 @@ class AuthenticationManager extends RouterModuleClient implements RealmModuleInt
      *
      * @param array $args
      * @param array $kwargs
-     * @param array $details
+     * @param \stdClass $details
      * @return array
      */
-    public function registerAuthMethod(array $args, $kwargs, $details)
+    public function registerAuthMethod(array $args, $kwargs, \stdClass $details)
     {
 
         // TODO: should return different error

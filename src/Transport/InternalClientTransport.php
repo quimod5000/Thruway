@@ -12,6 +12,8 @@ use Thruway\Message\Message;
  */
 class InternalClientTransport extends AbstractTransport
 {
+    private $sendMessageFunction;
+
     /**
      * Constructor
      *
