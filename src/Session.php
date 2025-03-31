@@ -50,6 +50,9 @@ class Session extends AbstractSession implements RealmModuleInterface
     /** @var float */
     private $lastOutboundActivity = 0;
 
+    /** @var array */
+    private $userData;
+
     /**
      * Constructor
      *
@@ -233,8 +236,25 @@ class Session extends AbstractSession implements RealmModuleInterface
             'authroles'     => $authRoles,
             'authmethod'    => $authMethod,
             'session'       => $this->getSessionId(),
+            'userdata'      => $this->getUserData(),
             'role_features' => $this->getRoleFeatures()
         ];
+    }
+
+     /**
+     * @return array
+     */
+    public function getUserData()
+    {
+        return $this->userData;
+    }
+
+    /**
+     * @param array $data
+     */
+    public function setUserData($data)
+    {
+        $this->userData = $data;
     }
 
     /**

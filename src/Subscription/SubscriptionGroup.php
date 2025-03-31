@@ -145,6 +145,11 @@ class SubscriptionGroup
         return $this->subscriptions;
     }
 
+    public function getSubscriptionCount()
+    {
+        return count($this->subscriptions);
+    }
+
     /**
      * @param array $subscriptions
      */

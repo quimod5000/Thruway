@@ -136,7 +136,7 @@ class AuthenticationManager extends RouterModuleClient implements RealmModuleInt
      */
     private function processMessage(Realm $realm, Session $session, Message $msg)
     {
-        Logger::debug($this, '**** Authentication Manager --ProcessMessage');
+        //Logger::debug($this, '**** Authentication Manager --ProcessMessage');
         if ($session->isAuthenticated()) {
             throw new \Exception('Message sent to authentication manager for already authenticated session.');
         }
@@ -367,6 +367,7 @@ class AuthenticationManager extends RouterModuleClient implements RealmModuleInt
             // message so that the roles and extras that go along with it can be
             // filled in
             if ($res[0] === 'SUCCESS') {
+                $session->setUserData((array)$res[1]);
                 $this->sendWelcomeMessage($session, $res[1]);
             } elseif (isset($res[0]) && $res[0] === 'FAILURE') {
                 $this->abortSessionUsingResponse($session, $res);
@@ -382,6 +383,7 @@ class AuthenticationManager extends RouterModuleClient implements RealmModuleInt
 
         $extra                    = new \stdClass();
         $extra->challenge_details = $session->getAuthenticationDetails()->getChallengeDetails();
+        $extra->client_extras     = $msg->getExtra();
 
         $arguments                = new \stdClass();
         $arguments->extra         = $extra;

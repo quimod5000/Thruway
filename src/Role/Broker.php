@@ -2,6 +2,7 @@
 
 namespace Thruway\Role;
 
+use DateTime;
 use Thruway\AbstractSession;
 use Thruway\Common\Utils;
 use Thruway\Event\LeaveRealmEvent;
@@ -156,14 +157,33 @@ class Broker implements RealmModuleInterface
 
         $matchHash = $matcher->getMatchHash($msg->getUri(), $msg->getOptions());
 
+        $isNewSubscriptionGroup = false;
         if (!isset($this->subscriptionGroups[$matchHash])) {
             $this->subscriptionGroups[$matchHash] = new SubscriptionGroup($matcher, $msg->getUri(), $msg->getOptions());
+            $isNewSubscriptionGroup = true;                       
         }
 
         /** @var SubscriptionGroup $subscriptionGroup */
         $subscriptionGroup = $this->subscriptionGroups[$matchHash];
         $subscription      = $subscriptionGroup->processSubscribe($session, $msg);
 
+        $data = $session->getMetaInfo();
+        $data['created'] = (new DateTime())->format('c');
+        $data['uri'] = $subscriptionGroup->getUri();
+        $data['match'] = $subscriptionGroup->getMatchType();
+
+        
+        //Fire off subscription.on_create meta event
+        $isMetaSubscription = is_string($data['uri']) && str_starts_with($data['uri'], 'wamp.metaevent');
+        if ($isNewSubscriptionGroup && !$isMetaSubscription){              
+            $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_create', [$data] );
+        }
+        //Fire off subscription.on_subscribe meta event (all previous values on data will be useful) 
+        if (!$isMetaSubscription){            
+            $data['subscription'] = $subscription->getId();
+            $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_subscribe', [$data]);
+        }
+     
         $registry = $this->getStateHandlerRegistry();
         if ($registry !== null) {
             $registry->processSubscriptionAdded($subscription);
@@ -201,6 +221,7 @@ class Broker implements RealmModuleInterface
     protected function processUnsubscribe(Session $session, UnsubscribeMessage $msg)
     {
         $subscription = false;
+        $isLastSubscriptionInGroup = false;
         // should probably be more efficient about this - maybe later
         /** @var SubscriptionGroup $subscriptionGroup */
         foreach ($this->subscriptionGroups as $subscriptionGroup) {
@@ -208,7 +229,8 @@ class Broker implements RealmModuleInterface
 
             if ($result !== false) {
                 $subscription = $result;
-            }
+                $isLastSubscriptionInGroup = $subscriptionGroup->getSubscriptionCount() <= 0;
+            }          
         }
 
         if ($subscription === false) {
@@ -216,6 +238,23 @@ class Broker implements RealmModuleInterface
             $session->sendMessage($errorMsg->setErrorURI('wamp.error.no_such_subscription'));
 
             return;
+        } 
+        else {
+            //Fire off the subscription.on_unsubscribe
+            $data = $session->getMetaInfo();
+            $data['uri'] = $subscription->getUri();
+            $data['match'] = $subscription->getSubscriptionGroup()->getMatchType();
+            $data['subscription'] =$subscription->getId();
+
+            $isMetaSubscription = is_string($data['uri']) && str_starts_with($data['uri'], 'wamp.metaevent');
+            if (!$isMetaSubscription){              
+                $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_unsubscribe', [$data]);
+            }
+
+            //If this was the last subscription for the topic, send off the delete        
+            if ($isLastSubscriptionInGroup && !$isMetaSubscription){              
+                $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_delete', [$data]);
+            }
         }
     }
 
@@ -335,5 +374,11 @@ class Broker implements RealmModuleInterface
     public function getSubscriptionGroups()
     {
         return $this->subscriptionGroups;
+    }
+
+    public function getSubscriptionGroupForTopic($topicName) {
+        $matchHash = "exact_" . $topicName;
+        $grp = $this->subscriptionGroups[$matchHash];
+        return $grp;
     }
 }
