@@ -2,6 +2,7 @@
 
 namespace Thruway\Subscription;
 
+use stdClass;
 use Thruway\Common\Utils;
 use Thruway\Logging\Logger;
 use Thruway\Message\EventMessage;
@@ -281,10 +282,33 @@ class SubscriptionGroup
 
             $this->removeSubscription($subscription);
 
+            //send acknowledgement back to client
             $session->sendMessage(new UnsubscribedMessage($msg->getRequestId()));
             return $subscription;
         }
         return false;
+    }
+
+     /**
+     * @param int $subscriptionId
+     * @param int $sessionId  (of requestor; 0 for admin)  
+     * @param bool $isAdmin
+     * @return \stdClass { $sub:Subscription|null , $err:string }
+     */
+    public function processUnsubscribeBySubscriptionId(int $subscriptionId, int $sessionId, bool $isAdmin = false) { //($sessionId, $subscriptionId, bool $isAdmin = false){        
+        if (!isset($this->subscriptions[$subscriptionId])) return (object)["sub" =>null, "error"=>"Subscription not found"];
+        /** @var Subscription $subscription */
+        $subscription = $this->subscriptions[$subscriptionId];
+        //Security /validation
+        if ($sessionId !== $subscription->getSession()->getSessionId() && !$isAdmin) return (object)["sub"=>null, "error"=>"Unsubscribe request from non-owner"];
+
+        $this->removeSubscription($subscription);
+                
+        return (object)["sub"=>$subscription, "error"=>""];
+    }
+
+    public function sendClientAcknowledgementUnsubscribed(Session $session, UnsubscribeMessage $msg){
+        $session->sendMessage(new UnsubscribedMessage($msg->getRequestId())); 
     }
 
     /**

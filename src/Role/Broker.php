@@ -142,8 +142,10 @@ class Broker implements RealmModuleInterface
         /** @var MatcherInterface $matcher */
         $matcher = $this->getMatcherForMatchType($msg->getMatchType());
         if ($matcher === false) {
-            Logger::alert($this,
-                "no matching match type for \"" . $msg->getMatchType() . "\" for URI \"" . $msg->getUri() . "\"");
+            Logger::alert(
+                $this,
+                "no matching match type for \"" . $msg->getMatchType() . "\" for URI \"" . $msg->getUri() . "\""
+            );
 
             return;
         }
@@ -160,7 +162,7 @@ class Broker implements RealmModuleInterface
         $isNewSubscriptionGroup = false;
         if (!isset($this->subscriptionGroups[$matchHash])) {
             $this->subscriptionGroups[$matchHash] = new SubscriptionGroup($matcher, $msg->getUri(), $msg->getOptions());
-            $isNewSubscriptionGroup = true;                       
+            $isNewSubscriptionGroup = true;
         }
 
         /** @var SubscriptionGroup $subscriptionGroup */
@@ -172,18 +174,18 @@ class Broker implements RealmModuleInterface
         $data['uri'] = $subscriptionGroup->getUri();
         $data['match'] = $subscriptionGroup->getMatchType();
 
-        
+
         //Fire off subscription.on_create meta event
         $isMetaSubscription = is_string($data['uri']) && str_starts_with($data['uri'], 'wamp.metaevent');
-        if ($isNewSubscriptionGroup && !$isMetaSubscription){              
-            $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_create', [$data] );
+        if ($isNewSubscriptionGroup && !$isMetaSubscription) {
+            $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_create', [$data]);
         }
         //Fire off subscription.on_subscribe meta event (all previous values on data will be useful) 
-        if (!$isMetaSubscription){            
+        if (!$isMetaSubscription) {
             $data['subscription'] = $subscription->getId();
             $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_subscribe', [$data]);
         }
-     
+
         $registry = $this->getStateHandlerRegistry();
         if ($registry !== null) {
             $registry->processSubscriptionAdded($subscription);
@@ -220,42 +222,78 @@ class Broker implements RealmModuleInterface
      */
     protected function processUnsubscribe(Session $session, UnsubscribeMessage $msg)
     {
-        $subscription = false;
-        $isLastSubscriptionInGroup = false;
-        // should probably be more efficient about this - maybe later
-        /** @var SubscriptionGroup $subscriptionGroup */
-        foreach ($this->subscriptionGroups as $subscriptionGroup) {
-            $result = $subscriptionGroup->processUnsubscribe($session, $msg);
-
-            if ($result !== false) {
-                $subscription = $result;
-                $isLastSubscriptionInGroup = $subscriptionGroup->getSubscriptionCount() <= 0;
-            }          
-        }
-
-        if ($subscription === false) {
+        $subId = $msg->getSubscriptionId();
+        $group = $this->GetGroupOfSubscription($subId);
+        if (!$group) return; //Sub should have existed in exactly 1 group
+        $result = $group->processUnsubscribeBySubscriptionId($subId, $session->getSessionId(), false);
+        $subscription = $result->sub;
+        if (!$subscription) {
+            if ($result->error) {
+                Logger::alert($this, $result->error . json_encode($msg));
+            }
             $errorMsg = ErrorMessage::createErrorMessageFromMessage($msg);
             $session->sendMessage($errorMsg->setErrorURI('wamp.error.no_such_subscription'));
-
             return;
-        } 
-        else {
-            //Fire off the subscription.on_unsubscribe
-            $data = $session->getMetaInfo();
-            $data['uri'] = $subscription->getUri();
-            $data['match'] = $subscription->getSubscriptionGroup()->getMatchType();
-            $data['subscription'] =$subscription->getId();
-
-            $isMetaSubscription = is_string($data['uri']) && str_starts_with($data['uri'], 'wamp.metaevent');
-            if (!$isMetaSubscription){              
-                $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_unsubscribe', [$data]);
-            }
-
-            //If this was the last subscription for the topic, send off the delete        
-            if ($isLastSubscriptionInGroup && !$isMetaSubscription){              
-                $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_delete', [$data]);
-            }
         }
+
+        $group->sendClientAcknowledgementUnsubscribed($session, $msg);        
+        $this->FireOffMetaEventsForSubscription($subscription, $session);
+    }
+
+
+    public function adminUnsubscribeBySubscriptionId(int $subscriptionId) 
+    {
+        $group = $this->GetGroupOfSubscription($subscriptionId);
+        if (!$group) return; //Sub should have existed in exactly 1 group
+        $result = $group->processUnsubscribeBySubscriptionId($subscriptionId, 0, true);
+        $subscription = $result->sub;
+        if (!$subscription) {
+            if ($result->error) {
+                Logger::alert($this, $result->error);
+            }
+            return; //Couldn't find this subscription
+        }
+        $this->FireOffMetaEventsForSubscription($subscription, $subscription->getSession());
+    }   
+
+    /**
+     * @param Subscription $subscription  
+     * @param Session $session to use for meta info 
+     *     (pass in the client session that requested it, or the subscription's session if it's an admin kick)   
+     * @return void
+     */
+    public function FireOffMetaEventsForSubscription(Subscription $subscription, Session $session)
+    {
+
+        $isLastSubscriptionInGroup = $subscription->getSubscriptionGroup()->getSubscriptionCount() <= 0;
+        $data = $session->getMetaInfo();
+        $data['uri'] = $subscription->getUri();
+        $data['match'] = $subscription->getSubscriptionGroup()->getMatchType();
+        $data['subscription'] = $subscription->getId();
+
+        //Fire off the subscription.on_unsubscribe, unless it's a subscription TO a meta event
+        $isMetaSubscription = is_string($data['uri']) && str_starts_with($data['uri'], 'wamp.metaevent');
+        if (!$isMetaSubscription) {
+            $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_unsubscribe', [$data]);
+        }
+
+        //If this was the last subscription for the topic, notify the delete        
+        if ($isLastSubscriptionInGroup && !$isMetaSubscription) {
+            $session->getRealm()->publishMeta('wamp.metaevent.subscription.on_delete', [$data]);
+        }
+    }
+
+    /**
+     * @param int $subscriptionId     
+     * @return SubscriptionGroup|null
+     */
+    private function GetGroupOfSubscription($subscriptionId)
+    {
+        foreach ($this->subscriptionGroups as $subscriptionGroup) {
+            if ($subscriptionGroup->containsSubscriptionId($subscriptionId))
+                return $subscriptionGroup;
+        }
+        return null;
     }
 
     /**
@@ -376,7 +414,8 @@ class Broker implements RealmModuleInterface
         return $this->subscriptionGroups;
     }
 
-    public function getSubscriptionGroupForTopic($topicName) {
+    public function getSubscriptionGroupForTopic($topicName)
+    {
         $matchHash = "exact_" . $topicName;
         $grp = $this->subscriptionGroups[$matchHash];
         return $grp;
