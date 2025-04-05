@@ -224,7 +224,7 @@ class Broker implements RealmModuleInterface
     {
         $subId = $msg->getSubscriptionId();
         $group = $this->GetGroupOfSubscription($subId);
-        if (!$group) return; //Sub should have existed in exactly 1 group
+        if (!$group) return false; //Sub should have existed in exactly 1 group
         $result = $group->processUnsubscribeBySubscriptionId($subId, $session->getSessionId(), false);
         $subscription = $result->sub;
         if (!$subscription) {
@@ -233,27 +233,30 @@ class Broker implements RealmModuleInterface
             }
             $errorMsg = ErrorMessage::createErrorMessageFromMessage($msg);
             $session->sendMessage($errorMsg->setErrorURI('wamp.error.no_such_subscription'));
-            return;
+            return false;
         }
 
         $group->sendClientAcknowledgementUnsubscribed($session, $msg);        
         $this->FireOffMetaEventsForSubscription($subscription, $session);
+        return true;
     }
 
 
     public function adminUnsubscribeBySubscriptionId(int $subscriptionId) 
-    {
+    {       
         $group = $this->GetGroupOfSubscription($subscriptionId);
-        if (!$group) return; //Sub should have existed in exactly 1 group
+        if (!$group) return false; //Sub should have existed in exactly 1 group
         $result = $group->processUnsubscribeBySubscriptionId($subscriptionId, 0, true);
         $subscription = $result->sub;
         if (!$subscription) {
             if ($result->error) {
                 Logger::alert($this, $result->error);
             }
-            return; //Couldn't find this subscription
+            return false; //Couldn't find this subscription
         }
+       
         $this->FireOffMetaEventsForSubscription($subscription, $subscription->getSession());
+        return true;
     }   
 
     /**

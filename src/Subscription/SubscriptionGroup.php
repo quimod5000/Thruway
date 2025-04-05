@@ -134,6 +134,12 @@ class SubscriptionGroup
             if ($this->getMatchType() !== 'exact') {
                 $eventMsg->getDetails()->topic = $msg->getUri();
             }
+            //add user data to args
+            if (empty($eventMsg->getArguments())){
+                $data = $session->getMetaInfo();                
+                $eventMsg->setArguments([$data]);
+            }
+
             $subscription->sendEventMessage($eventMsg);
         }
     }
@@ -302,6 +308,10 @@ class SubscriptionGroup
         //Security /validation
         if ($sessionId !== $subscription->getSession()->getSessionId() && !$isAdmin) return (object)["sub"=>null, "error"=>"Unsubscribe request from non-owner"];
 
+        //If user is being kicked out by admin, alert them with a msg before they get kicked
+        if ($isAdmin){
+            $this->sendClientAcknowledgementWillBeKicked($subscription->getSession(), $subscriptionId, 1);
+        }
         $this->removeSubscription($subscription);
                 
         return (object)["sub"=>$subscription, "error"=>""];
@@ -309,6 +319,16 @@ class SubscriptionGroup
 
     public function sendClientAcknowledgementUnsubscribed(Session $session, UnsubscribeMessage $msg){
         $session->sendMessage(new UnsubscribedMessage($msg->getRequestId())); 
+    }
+
+    public function sendClientAcknowledgementWillBeKicked(Session $session, $subId, $pubId){
+
+        $kwargs = new stdClass;
+        $kwargs->message = new stdClass();
+        $kwargs->message->text = "You are being kicked out of the channel.";
+        $kwargs->meta = new stdClass();
+        $kwargs->meta->type = "admin";
+        $session->sendMessage(new EventMessage($subId, $pubId, new stdClass, [""], $kwargs)); 
     }
 
     /**
